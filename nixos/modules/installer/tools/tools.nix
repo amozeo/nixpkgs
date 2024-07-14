@@ -25,6 +25,14 @@ let
     inherit (config.system.nixos-generate-config) configuration desktopConfiguration;
     xserverEnabled = config.services.xserver.enable;
     manPage = ./manpages/nixos-generate-config.8;
+    templateDir = pkgs.substituteAllFiles {
+      name = "nixos-generate-config-templates";
+      src = ./config-templates;
+      files = [ "." ]; # All files
+
+      inherit (nixos-generate-config) hostPlatformSystem;
+      hostname = config.networking.hostName;
+    };
   };
 
   nixos-version = makeProg {
