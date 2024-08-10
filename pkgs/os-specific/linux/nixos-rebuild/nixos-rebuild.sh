@@ -475,8 +475,7 @@ fi
 # Find configuration.nix and open editor instead of building.
 if [ "$action" = edit ]; then
     if [[ -z $buildingAttribute ]]; then
-        log "error: '--file' and '--attr' are not supported with 'edit'"
-        exit 1
+        runCmd exec ${EDITOR:-nano} "$buildFile"
     elif [[ -z $flake ]]; then
         NIXOS_CONFIG=${NIXOS_CONFIG:-$(runCmd nix-instantiate --find-file nixos-config)}
         if [[ -d $NIXOS_CONFIG ]]; then
