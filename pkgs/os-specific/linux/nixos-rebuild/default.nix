@@ -44,6 +44,7 @@ substitute {
 
   # run some a simple installer tests to make sure nixos-rebuild still works for them
   passthru.tests = {
+    configuration-detection = nixosTests.nixos-rebuild-configuration-detection;
     install-bootloader = nixosTests.nixos-rebuild-install-bootloader;
     repl = callPackage ./test/repl.nix {};
     simple-installer = nixosTests.installer.simple;
