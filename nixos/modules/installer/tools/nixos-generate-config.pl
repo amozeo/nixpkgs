@@ -800,12 +800,14 @@ EOF
 
     opendir(my $dH, $outDir);
     my @outDirContents = grep {
-        $_ ne "configuration.nix"
+        $_ ne "."
+        && $_ ne ".."
+        && $_ ne "configuration.nix"
         && $_ ne "hardware-configuration.nix"
     } readdir($dH);
     closedir($dH);
 
-    if ($force || length(scalar @outDirContents) == 0) {
+    if ($force || scalar @outDirContents == 0) {
         # Apply template
         my $unstableRevision = "";
         my $stableRevision = "";
