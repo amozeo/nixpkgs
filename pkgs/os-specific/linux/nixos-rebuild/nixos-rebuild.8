@@ -10,7 +10,7 @@
 .Sh SYNOPSIS
 .Nm
 .Bro
-.Cm switch | boot | test | build | dry-build | dry-activate | edit | repl | build-vm | build-vm-with-bootloader | list-generations Op Fl -json
+.Cm switch | boot | test | build | dry-build | dry-activate | edit | repl | build-vm | build-vm-with-bootloader | list-generations Op Fl -json | find-config
 .Brc
 .br
 .Op Fl -upgrade | -upgrade-all
@@ -235,6 +235,15 @@ menu. It shows the generation number, build date and time, NixOS version,
 kernel version and the configuration revision.
 There is also a json version of output available.
 .El
+
+.It Cm find-config
+Prints the build method and path to a file, and other related information
+about the configuration that will be used for system build, even when
+the configuration is provided through other parameters like
+.Fl -file Ns
+,
+.Fl -flake Ns
+or environment variables.
 .
 .
 .

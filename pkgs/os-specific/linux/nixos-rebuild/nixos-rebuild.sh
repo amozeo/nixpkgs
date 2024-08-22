@@ -52,7 +52,7 @@ while [ "$#" -gt 0 ]; do
       --help)
         showSyntax
         ;;
-      switch|boot|test|build|edit|repl|dry-build|dry-run|dry-activate|build-vm|build-vm-with-bootloader|list-generations)
+      switch|boot|test|build|edit|repl|dry-build|dry-run|dry-activate|build-vm|build-vm-with-bootloader|list-generations|find-config)
         if [ "$i" = dry-run ]; then i=dry-build; fi
         if [ "$i" = list-generations ]; then
             buildNix=
@@ -480,7 +480,7 @@ fi
 
 # If ‘--upgrade’ or `--upgrade-all` is given,
 # run ‘nix-channel --update nixos’.
-if [[ -z "${requestedBuildMethods["flake"]}" && -n $upgrade && -z $_NIXOS_REBUILD_REEXEC ]]; then
+if [[ -z "${requestedBuildMethods["flake"]}" && -n $upgrade && -z $_NIXOS_REBUILD_REEXEC && $action != find-config ]]; then
     # If --upgrade-all is passed, or there are other channels that
     # contain a file called ".update-on-nixos-rebuild", update them as
     # well. Also upgrade the nixos channel.
@@ -525,6 +525,19 @@ if [[ -n "${requestedBuildMethods["flake"]}" ]]; then
     else
         flakeAttr="nixosConfigurations.\"$flakeAttr\""
     fi
+fi
+
+if [[ $action = find-config ]]; then
+        echo "type: ${!requestedBuildMethods[@]}"
+    if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
+        echo "file: $buildFile"
+        echo "attribute path: $attr"
+    elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
+        echo "file: $NIXOS_CONFIG"
+    elif [[ -n "${requestedBuildMethods["flake"]}" ]]; then
+        echo "flake: $flake"
+    fi
+    exit 0
 fi
 
 if [[ ! -z "$specialisation" && ! "$action" = switch && ! "$action" = test ]]; then
