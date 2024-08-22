@@ -96,7 +96,7 @@ let
       reverseList listDfs toposort sort sortOn naturalSort compareLists take
       drop sublist last init crossLists unique allUnique intersectLists
       subtractLists mutuallyExclusive groupBy groupBy' concatLists genList
-      length head tail elem elemAt isList;
+      length head tail elem elemAt isList curryToListN curryToListN';
     inherit (self.strings) concatStrings concatMapStrings concatImapStrings
       stringLength substring isString replaceStrings
       intersperse concatStringsSep concatMapStringsSep

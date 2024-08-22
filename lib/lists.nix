@@ -1898,4 +1898,64 @@ rec {
   */
   mutuallyExclusive = a: b: length a == 0 || !(any (x: elem x a) b);
 
+  /**
+    Return function that collects n arguments to a list.
+
+    # Inputs
+
+    `n`
+
+    : Number of arguments to collect
+
+    # Examples
+    :::{.example}
+    ## `lib.lists.curryToListN` usage example
+
+    ```nix
+    curryToListN 0
+    => []
+    curryToListN 1 "a"
+    => [ "a" ]
+    curryToListN 2 "a" "b"
+    => [ "a" "b" ]
+    curryToListN 3 "a" "b" "c"
+    => [ "a" "b" "c" ]
+    ```
+
+    :::
+  */
+  curryToListN = n: curryToListN' n [];
+
+  /**
+    Return function that appends n arguments to acc.
+
+    # Inputs
+
+    `n`
+
+    : Number of arguments to collect
+
+    `acc`
+
+    : Accumulator
+
+    # Examples
+    :::{.example}
+    ## `lib.lists.curryToListN'` usage example
+
+    ```nix
+    curryToListN' 0 []
+    => []
+    curryToListN' 1 [ "x" "y" "z" ] "b"
+    => [ "x" "y" "z" "b" ]
+    curryToListN' 2 [ "x" ] "b" "c"
+    => [ "x" "b" "c" ]
+    ```
+
+    :::
+  */
+  curryToListN' = n: acc:
+    if n == 0 then acc
+    else x: curryToListN' (n - 1) (acc ++ [x]);
+
 }
