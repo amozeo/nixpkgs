@@ -33,10 +33,11 @@ buildHost=
 targetHost=
 remoteSudo=
 verboseScript=
-noFlake=
 attr=
 buildFile=
-buildingFile=
+# keys: module, by-attrset, flake
+declare -A requestedBuildMethods
+declare -A blacklistedBuildMethods
 installBootloader=
 json=
 
@@ -66,8 +67,12 @@ while [ "$#" -gt 0 ]; do
             log "$0: '$i' requires an argument"
             exit 1
         fi
-        buildFile="$1"
-        buildingFile=1
+        if [ -f "$1" ]; then
+            buildFile="$1"
+        else
+            buildFile="${1%/}/system.nix"
+        fi
+        requestedBuildMethods["by-attrset"]=1
         shift 1
         ;;
       --attr|-A)
@@ -76,7 +81,7 @@ while [ "$#" -gt 0 ]; do
             exit 1
         fi
         attr="$1"
-        buildingFile=1
+        requestedBuildMethods["by-attrset"]=1
         shift 1
         ;;
       --install-grub)
@@ -154,10 +159,17 @@ while [ "$#" -gt 0 ]; do
         ;;
       --flake)
         flake="$1"
+        requestedBuildMethods["flake"]=1
         shift 1
         ;;
       --no-flake)
-        noFlake=1
+        blacklistedBuildMethods["flake"]=1
+        ;;
+      --no-by-attrset)
+        blacklistedBuildMethods["by-attrset"]=1
+        ;;
+      --no-module)
+        blacklistedBuildMethods["module"]=1
         ;;
       --recreate-lock-file|--no-update-lock-file|--no-write-lock-file|--no-registries|--commit-lock-file)
         lockFlags+=("$i")
@@ -383,28 +395,92 @@ findInParents() {
     fi
 }
 
-# Default build file if none is specified in the arguments
-if [[ -z $buildFile ]]; then
-    # From NIX_PATH
-    if ! buildFile=$(runCmd nix-instantiate --find-file nixos-system 2>/dev/null); then
-        # From system.nix up from the current directory
-        if ! buildFile=$(findInParents "$PWD" system.nix); then
-            # Hardcoded to /etc/nixos/system.nix
-            if [[ -f "/etc/nixos/system.nix" ]]; then
-                buildFile=/etc/nixos/system.nix
-            fi
-        fi
+# remove blacklisted build methods from requested build methods
+for blacklistedMethod in "${!blacklistedBuildMethods[@]}"; do
+    logVerbose "blacklisting build method: $blacklistedMethod"
+    unset requestedBuildMethods["$blacklistedMethod"]
+done
+
+# If user requested multiple build methods, abort
+if [[ ${#requestedBuildMethods[@]} -gt 1 ]]; then
+    log "error: multiple build methods requested: ${requestedBuildMethods[@]}"
+    exit 1
+fi
+
+findFlake() {
+    # - Hardcoded resolved symlink /etc/nixos/flake.nix
+    if [[ -e /etc/nixos/flake.nix ]]; then
+        resolvedFlake="$(dirname "$(readlink -f /etc/nixos/flake.nix)")"
+        flake=$resolvedFlake
+        return 0
+    fi
+    return 1
+}
+
+findByAttrset() {
+    # - From nixos-system in nix path
+    # - From system.nix up from the current directory
+    # - Hardcoded to /etc/nixos/system.nix
+    if resolvedBuildFile="$(runCmd nix-instantiate --find-file nixos-system 2>/dev/null)"; then
+        buildFile=$resolvedBuildFile
+        return 0
+    elif resolvedBuildFile="$(findInParents "$PWD" system.nix)"; then
+        buildFile=$resolvedBuildFile
+        return 0
+    elif [[ -f "/etc/nixos/system.nix" ]]; then
+        buildFile="/etc/nixos/system.nix"
+        return 0
+    fi
+    return 1
+}
+
+findModule() {
+    # - From NIXOS_CONFIG environment variable
+    # - From nixos-config in nix path
+    if [[ -n $NIXOS_CONFIG ]]; then
+        return 0
+    elif resolvedNixosConfig="$(runCmd nix-instantiate --find-file nixos-config 2>/dev/null)"; then
+        NIXOS_CONFIG=$resolvedNixosConfig
+        return 0
+    fi
+    return 1
+}
+
+# If user didn't request a specific build method, try to find one
+if [[ ${#requestedBuildMethods[@]} -eq 0 ]]; then
+    logVerbose "No build method explicitly requested"
+    if [[ -z "${blacklistedBuildMethods["flake"]}" ]] && findFlake; then
+        requestedBuildMethods["flake"]=1
+        logVerbose "Found flake '$flake'"
+    elif [[ -z "${blacklistedBuildMethods["by-attrset"]}" ]] && findByAttrset; then
+        requestedBuildMethods["by-attrset"]=1
+        logVerbose "Found by-attrset '$buildFile'"
+    elif [[ -z "${blacklistedBuildMethods["module"]}" ]] && findModule; then
+        requestedBuildMethods["module"]=1
+        logVerbose "Found module '$NIXOS_CONFIG'"
+    else
+        log "error: no build method found"
+        exit 1
     fi
 fi
 
-if [[ -n $attr && -z $buildFile ]]; then
+# find configuration files if not already found
+if [[ -n "${requestedBuildMethods["flake"]}" && -z $flake ]]; then
+    findFlake
+elif [[ -n "${requestedBuildMethods["by-attrset"]}" && -z $buildFile ]]; then
+    findByAttrset
+elif [[ -n "${requestedBuildMethods["module"]}" && -z $NIXOS_CONFIG ]]; then
+    findModule
+fi
+
+if [[ -n "${requestedBuildMethods["by-attrset"]}" && -n $attr && -z $buildFile ]]; then
     log "error: '--attr' cannot be used without '--file', a 'nixos-system' entry in 'NIX_PATH', or '/etc/nixos/system.nix' existing"
     exit 1
 fi
 
 # If ‘--upgrade’ or `--upgrade-all` is given,
 # run ‘nix-channel --update nixos’.
-if [[ -n $upgrade && -z $_NIXOS_REBUILD_REEXEC && -z $flake ]]; then
+if [[ -z "${requestedBuildMethods["flake"]}" && -n $upgrade && -z $_NIXOS_REBUILD_REEXEC ]]; then
     # If --upgrade-all is passed, or there are other channels that
     # contain a file called ".update-on-nixos-rebuild", update them as
     # well. Also upgrade the nixos channel.
@@ -433,15 +509,9 @@ if [ -z "$_NIXOS_REBUILD_REEXEC" ]; then
     export PATH=@nix@/bin:$PATH
 fi
 
-# Use /etc/nixos/flake.nix if it exists. It can be a symlink to the
-# actual flake.
-if [[ -z $flake && -e /etc/nixos/flake.nix && -z $noFlake ]]; then
-    flake="$(dirname "$(readlink -f /etc/nixos/flake.nix)")"
-fi
-
 # For convenience, use the hostname as the default configuration to
 # build from the flake.
-if [[ -n $flake ]]; then
+if [[ -n "${requestedBuildMethods["flake"]}" ]]; then
     if [[ $flake =~ ^(.*)\#([^\#\"]*)$ ]]; then
        flake="${BASH_REMATCH[1]}"
        flakeAttr="${BASH_REMATCH[2]}"
@@ -482,14 +552,14 @@ trap cleanup EXIT
 
 # Re-execute nixos-rebuild from the Nixpkgs tree.
 if [[ -z $_NIXOS_REBUILD_REEXEC && -n $canRun && -z $fast ]]; then
-    if [[ -n $buildingFile ]]; then
+    if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
         p=$(runCmd nix-build --no-out-link "$buildFile" -A "${attr:+$attr.}config.system.build.nixos-rebuild" "${extraBuildFlags[@]}")
         SHOULD_REEXEC=1
-    elif [[ -z $flake ]]; then
+    elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
         if p=$(runCmd nix-build --no-out-link --expr 'with import <nixpkgs/nixos> {}; config.system.build.nixos-rebuild' "${extraBuildFlags[@]}"); then
             SHOULD_REEXEC=1
         fi
-    else
+    else # flake
         runCmd nix "${flakeFlags[@]}" build --out-link "${tmpDir}/nixos-rebuild" "$flake#$flakeAttr.config.system.build.nixos-rebuild" "${extraBuildFlags[@]}" "${lockFlags[@]}"
         if p=$(readlink -e "${tmpDir}/nixos-rebuild"); then
             SHOULD_REEXEC=1
@@ -507,15 +577,15 @@ fi
 
 # Find configuration.nix and open editor instead of building.
 if [ "$action" = edit ]; then
-    if [[ -n $buildingFile ]]; then
+    if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
         runCmd exec ${EDITOR:-nano} "$buildFile"
-    elif [[ -z $flake ]]; then
+    elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
         NIXOS_CONFIG=${NIXOS_CONFIG:-$(runCmd nix-instantiate --find-file nixos-config)}
         if [[ -d $NIXOS_CONFIG ]]; then
             NIXOS_CONFIG=$NIXOS_CONFIG/default.nix
         fi
         runCmd exec ${EDITOR:-nano} "$NIXOS_CONFIG"
-    else
+    else # flake
         runCmd exec nix "${flakeFlags[@]}" edit "${lockFlags[@]}" -- "$flake#$flakeAttr"
     fi
     exit 1
@@ -554,7 +624,7 @@ prebuiltNix() {
 getNixDrv() {
     nixDrv=
 
-    if [[ -n $buildingFile ]]; then
+    if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
         if nixDrv="$(runCmd nix-instantiate "$buildFile" --add-root "$tmpDir/nix.drv" --indirect -A ${attr:+$attr.}config.nix.package.out "${extraBuildFlags[@]}")"; then return; fi
     fi
     if nixDrv="$(runCmd nix-instantiate '<nixpkgs/nixos>' --add-root "$tmpDir/nix.drv" --indirect -A config.nix.package.out "${extraBuildFlags[@]}")"; then return; fi
@@ -602,7 +672,7 @@ getVersion() {
 }
 
 
-if [[ -n $buildNix && -z $flake ]]; then
+if [[ -n $buildNix && -z "${requestedBuildMethods["flake"]}" ]]; then
     log "building Nix..."
     getNixDrv
     if [ -a "$nixDrv" ]; then
@@ -621,7 +691,7 @@ fi
 
 # Update the version suffix if we're building from Git (so that
 # nixos-version shows something useful).
-if [[ -n $canRun && -z $flake ]]; then
+if [[ -n $canRun && -z "${requestedBuildMethods["flake"]}" ]]; then
     if nixpkgs=$(runCmd nix-instantiate --find-file nixpkgs "${extraBuildFlags[@]}"); then
         suffix=$(getVersion "$nixpkgs" || true)
         if [ -n "$suffix" ]; then
@@ -639,11 +709,11 @@ if [ "$action" = repl ]; then
     # This is a very end user command, implemented using sub-optimal means.
     # You should feel free to improve its behavior, as well as resolve tech
     # debt in "breaking" ways. Humans adapt quite well.
-    if [[ -n $buildingFile ]]; then
+    if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
         exec nix repl --file "$buildFile" "$attr" "${extraBuildFlags[@]}"
-    elif [[ -z $flake ]]; then
+    elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
         exec nix repl --file '<nixpkgs/nixos>' "${extraBuildFlags[@]}"
-    else
+    else # flake
         if [[ -n "${lockFlags[0]}" ]]; then
             # nix repl itself does not support locking flags
             log "nixos-rebuild repl does not support locking flags yet"
@@ -793,37 +863,37 @@ fi
 if [ -z "$rollback" ]; then
     log "building the system configuration..."
     if [[ "$action" = switch || "$action" = boot ]]; then
-        if [[ -n $buildingFile ]]; then
+        if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
             pathToConfig="$(nixBuild "$buildFile" -A "${attr:+$attr.}config.system.build.toplevel" "${extraBuildFlags[@]}")"
-        elif [[ -z $flake ]]; then
+        elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
             pathToConfig="$(nixBuild '<nixpkgs/nixos>' --no-out-link -A system "${extraBuildFlags[@]}")"
-        else
+        else # flake
             pathToConfig="$(nixFlakeBuild "$flake#$flakeAttr.config.system.build.toplevel" "${extraBuildFlags[@]}" "${lockFlags[@]}")"
         fi
         copyToTarget "$pathToConfig"
         targetHostSudoCmd nix-env -p "$profile" --set "$pathToConfig"
     elif [[ "$action" = test || "$action" = build || "$action" = dry-build || "$action" = dry-activate ]]; then
-        if [[ -n $buildingFile ]]; then
+        if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
             pathToConfig="$(nixBuild "$buildFile" -A "${attr:+$attr.}config.system.build.toplevel" "${extraBuildFlags[@]}")"
-        elif [[ -z $flake ]]; then
+        elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
             pathToConfig="$(nixBuild '<nixpkgs/nixos>' -A system -k "${extraBuildFlags[@]}")"
-        else
+        else # flake
             pathToConfig="$(nixFlakeBuild "$flake#$flakeAttr.config.system.build.toplevel" "${extraBuildFlags[@]}" "${lockFlags[@]}")"
         fi
     elif [ "$action" = build-vm ]; then
-        if [[ -n $buildingFile ]]; then
+        if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
             pathToConfig="$(nixBuild "$buildFile" -A "${attr:+$attr.}config.system.build.vm" "${extraBuildFlags[@]}")"
-        elif [[ -z $flake ]]; then
+        elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
             pathToConfig="$(nixBuild '<nixpkgs/nixos>' -A vm -k "${extraBuildFlags[@]}")"
-        else
+        else # flake
             pathToConfig="$(nixFlakeBuild "$flake#$flakeAttr.config.system.build.vm" "${extraBuildFlags[@]}" "${lockFlags[@]}")"
         fi
     elif [ "$action" = build-vm-with-bootloader ]; then
-        if [[ -n $buildingFile ]]; then
+        if [[ -n "${requestedBuildMethods["by-attrset"]}" ]]; then
             pathToConfig="$(nixBuild "$buildFile" -A "${attr:+$attr.}config.system.build.vmWithBootLoader" "${extraBuildFlags[@]}")"
-        elif [[ -z $flake ]]; then
+        elif [[ -n "${requestedBuildMethods["module"]}" ]]; then
             pathToConfig="$(nixBuild '<nixpkgs/nixos>' -A vmWithBootLoader -k "${extraBuildFlags[@]}")"
-        else
+        else # flake
             pathToConfig="$(nixFlakeBuild "$flake#$flakeAttr.config.system.build.vmWithBootLoader" "${extraBuildFlags[@]}" "${lockFlags[@]}")"
         fi
     else
