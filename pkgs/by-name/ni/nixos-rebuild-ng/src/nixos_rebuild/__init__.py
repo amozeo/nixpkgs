@@ -9,9 +9,10 @@ from typing import assert_never
 
 from . import nix, tmpdir
 from .constants import EXECUTABLE, WITH_NIX_2_18, WITH_REEXEC, WITH_SHELL_FILES
-from .models import Action, BuildAttr, Flake, ImageVariants, NRError, Profile
+from .models import Action, BuildAttr, BuildMethod, Flake, ImageVariants, NRError, Profile
 from .process import Remote, cleanup_ssh
-from .utils import Args, LogFormatter, tabulate
+from .utils import Args, LogFormatter, tabulate, AppendingStringParser
+from .locator import *
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -91,25 +92,51 @@ def get_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentPa
         "--debug", action="store_true", help="Enable debug logging"
     )
     main_parser.add_argument(
-        "--file", "-f", help="Enable and build the NixOS system from the specified file"
+        "--file", "-f",
+        action=AppendingStringParser,
+        destValue="file",
+        destAppend="requested_build_methods",
+        const=BuildMethod.ATTR,
+        help="Enable and build the NixOS system from the specified file"
     )
     main_parser.add_argument(
         "--attr",
         "-A",
+        action=AppendingStringParser,
+        destValue="attr",
+        destAppend="requested_build_methods",
+        const=BuildMethod.ATTR,
         help="Enable and build the NixOS system from nix file and use the "
         + "specified attribute path from file specified by the --file option",
     )
     main_parser.add_argument(
         "--flake",
-        nargs="?",
-        const=True,
+        action=AppendingStringParser,
+        destValue="flake",
+        destAppend="requested_build_methods",
+        const=BuildMethod.FLAKE,
         help="Build the NixOS system from the specified flake",
     )
     main_parser.add_argument(
         "--no-flake",
-        dest="flake",
-        action="store_false",
-        help="Do not imply --flake if /etc/nixos/flake.nix exists",
+        dest="blacklisted_build_methods",
+        action="append_const",
+        const=BuildMethod.FLAKE,
+        help="Do not build by flake if defined or found",
+    )
+    main_parser.add_argument(
+        "--no-by-attrset",
+        dest="blacklisted_build_methods",
+        action="append_const",
+        const=BuildMethod.ATTR,
+        help="Do not build by attribute set if defined or found",
+    )
+    main_parser.add_argument(
+        "--no-module",
+        dest="blacklisted_build_methods",
+        action="append_const",
+        const=BuildMethod.MODULE,
+        help="Do not build by module if defined or found",
     )
     main_parser.add_argument(
         "--install-bootloader",
@@ -263,8 +290,37 @@ def parse_args(
             f"--target-host/--build-host is not supported with '{args.action}'"
         )
 
-    if args.flake and (args.file or args.attr):
-        parser.error("--flake cannot be used with --file or --attr")
+    for e in args.blacklisted_build_methods:
+        if e in args.requested_build_methods:
+            args.requested_build_methods.remove(e)
+
+    if len(args.requested_build_methods) > 1:
+        parser.error(
+            f"multiple build methods requested: {', '.join(args.requested_build_methods)}"
+        )
+    
+    if len(args.requested_build_methods) == 1:
+        args.requested_build_methods = args.requested_build_methods[0]
+    
+    if len(args.requested_build_methods) == 0:
+        logger.debug("no build method explicitly requested")
+        if BuildMethod.FLAKE not in args.blacklisted_build_methods and (flake := locator.find_flake()):
+            args.requested_build_methods = BuildMethod.FLAKE
+            args.flake = str(flake)
+            logger.debug("flake found at %s", flake)
+        
+        elif BuildMethod.ATTR not in args.blacklisted_build_methods and (attrset := locator.find_by_attrset()):
+            args.requested_build_methods = BuildMethod.ATTR
+            args.file = str(attrset)
+            logger.debug("by-attrset found at %s", attrset)
+        elif BuildMethod.MODULE not in args.blacklisted_build_methods and (module := locator.find_module()):
+            args.requested_build_methods = BuildMethod.MODULE
+            args.file = str(module)
+            logger.debug("module found at %s", module)
+        else:
+            parser.error("no build method found")
+
+
 
     return args, args_groups
 
@@ -558,19 +614,4 @@ def main() -> None:
     ch.setFormatter(LogFormatter())
     logger.addHandler(ch)
 
-    try:
-        execute(sys.argv)
-    except CalledProcessError as ex:
-        if logger.level == logging.DEBUG:
-            import traceback
-
-            traceback.print_exc()
-        else:
-            print(str(ex), file=sys.stderr)
-        # Exit with the error code of the process that failed
-        sys.exit(ex.returncode)
-    except (Exception, KeyboardInterrupt) as ex:
-        if logger.level == logging.DEBUG:
-            raise
-        else:
-            sys.exit(str(ex))
+    execute(sys.argv)
