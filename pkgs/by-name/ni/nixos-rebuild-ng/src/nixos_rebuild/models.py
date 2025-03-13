@@ -61,6 +61,12 @@ class BuildAttr:
         return cls(Path(file or "default.nix"), attr)
 
 
+class BuildMethod(Enum):
+    MODULE = "module"
+    ATTR = "by-attrset"
+    FLAKE = "flake"
+
+
 def discover_git(location: Path) -> str | None:
     current = location.resolve()
     previous = None

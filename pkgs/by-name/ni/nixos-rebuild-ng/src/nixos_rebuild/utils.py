@@ -1,3 +1,4 @@
+import argparse
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, assert_never, override
@@ -99,3 +100,24 @@ def tabulate(
         result.append(format_row(row))
 
     return "\n".join(result)
+
+# Combines "append_const" and "store" parser actions into one.
+class AppendingStringParser(argparse.Action):
+    def __init__(self, option_strings, dest, destValue=None, destAppend=None, **kwargs):
+        if destValue is None:
+            destValue = dest
+        self.destValue = destValue
+        self.destAppend = destAppend
+        super().__init__(option_strings, dest=destValue, **kwargs)
+    
+    def __call__(self, parser, namespace, values, option_string=None):
+        value = values if isinstance(values, str) else values[values.count()-1]
+        setattr(namespace, self.destValue, value)
+
+        if not hasattr(namespace, self.destAppend) or getattr(namespace, self.destAppend) is None:
+            setattr(namespace, self.destAppend, [])
+
+        if not isinstance(getattr(namespace, self.destAppend), list):
+            raise ValueError(f"Attribute {self.destAppend} is not a list")
+
+        getattr(namespace, self.destAppend).append(self.const)
