@@ -2,23 +2,20 @@
   lib,
   buildNpmPackage,
   fetchFromGitHub,
-  pkg-config,
-  python3,
-  vips,
 }:
 
-buildNpmPackage rec {
+buildNpmPackage {
   pname = "btc-rpc-explorer";
-  version = "3.4.0";
+  version = "3.4.0-unstable-2024-12-16";
 
   src = fetchFromGitHub {
     owner = "janoside";
     repo = "btc-rpc-explorer";
-    rev = "v${version}";
-    hash = "sha256-ZGg3jwSl1XyzS9hMa2YqwExhHSNgrsUmSscZtfF2h54=";
+    rev = "f0b81a1ccf9c8722fa78eb6e3092761a6cd38edb";
+    hash = "sha256-UzTNw5YRJKwIF3Yf3uLm9tGJkHQK3XJGYCLoy9CI9xo=";
   };
 
-  npmDepsHash = "sha256-9pVjydGaEaHytZqwXv0/kaJAVqlE7zzuTvubBFTkuBg=";
+  npmDepsHash = "sha256-kHHiyB+VAbgbLJs9S4B0qv+3IC07LM4auSIFbJQ34fM=";
 
   postPatch = ''
     ln -s npm-shrinkwrap.json package-lock.json
@@ -26,26 +23,13 @@ buildNpmPackage rec {
 
   makeCacheWritable = true;
 
-  nativeBuildInputs = [
-    pkg-config
-    python3
-  ];
-
-  buildInputs = [
-    vips
-  ];
-
   dontNpmBuild = true;
 
   meta = {
-    changelog = "https://github.com/janoside/btc-rpc-explorer/blob/${src.rev}/CHANGELOG.md";
     description = "Database-free, self-hosted Bitcoin explorer, via RPC to Bitcoin Core";
     homepage = "https://github.com/janoside/btc-rpc-explorer";
     license = lib.licenses.mit;
     mainProgram = "btc-rpc-explorer";
     maintainers = with lib.maintainers; [ d-xo ];
-    broken = true;
-    # At 2024-06-29
-    # https://hydra.nixos.org/build/264232177/nixlog/1
   };
 }
