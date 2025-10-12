@@ -15,7 +15,8 @@ from typing import Final, Literal
 from . import tmpdir
 from .models import (
     Action,
-    BuildAttr,
+    BuildAttrset,
+    BuildModule,
     Flake,
     Generation,
     GenerationJson,
@@ -48,8 +49,8 @@ logger: Final = logging.getLogger(__name__)
 
 
 def build(
+    path: Path | str,
     attr: str,
-    build_attr: BuildAttr,
     build_flags: Args | None = None,
 ) -> Path:
     """Build NixOS attribute using classic Nix.
@@ -58,9 +59,9 @@ def build(
     """
     run_args = [
         "nix-build",
-        build_attr.path,
+        path,
         "--attr",
-        build_attr.to_attr(attr),
+        attr,
         *dict_to_flags(build_flags),
     ]
     r = run_wrapper(run_args, stdout=PIPE)
@@ -89,8 +90,8 @@ def build_flake(
 
 
 def build_remote(
+    path: str | Path,
     attr: str,
-    build_attr: BuildAttr,
     build_host: Remote | None,
     realise_flags: Args | None = None,
     instantiate_flags: Args | None = None,
@@ -102,9 +103,9 @@ def build_remote(
     r = run_wrapper(
         [
             "nix-instantiate",
-            build_attr.path,
+            path,
             "--attr",
-            build_attr.to_attr(attr),
+            attr,
             "--add-root",
             tmpdir.TMPDIR_PATH / uuid.uuid4().hex,
             *dict_to_flags(instantiate_flags),
@@ -272,15 +273,11 @@ def find_file(file: str, nix_flags: Args | None = None) -> Path | None:
 
 
 def get_build_image_name(
-    build_attr: BuildAttr,
+    file: Path | str,
+    attr: str | None,
     image_variant: str,
     instantiate_flags: Args | None = None,
 ) -> str:
-    path = (
-        f'"{build_attr.path.resolve()}"'
-        if isinstance(build_attr.path, Path)
-        else build_attr.path
-    )
     r = run_wrapper(
         [
             "nix-instantiate",
@@ -290,10 +287,10 @@ def get_build_image_name(
             "--expr",
             textwrap.dedent(f"""
             let
-              value = import {path};
+              value = import {file};
               set = if builtins.isFunction value then value {{}} else value;
             in
-              set.{build_attr.to_attr("config.system.build.images", image_variant, "passthru", "filePath")}
+              set.{attr + "." if attr else ""}config.system.build.images.{image_variant}.passthru.filePath
             """),
             *dict_to_flags(instantiate_flags),
         ],
@@ -325,13 +322,13 @@ def get_build_image_name_flake(
 
 
 def get_build_image_variants(
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset | BuildModule,
     instantiate_flags: Args | None = None,
 ) -> ImageVariants:
     path = (
-        f'"{build_attr.path.resolve()}"'
-        if isinstance(build_attr.path, Path)
-        else build_attr.path
+        f'"{build_attr.path}"'
+        if isinstance(build_attr, BuildAttrset)
+        else "<nixpkgs/nixos>"
     )
     r = run_wrapper(
         [
@@ -533,10 +530,10 @@ def list_generations(profile: Profile) -> list[GenerationJson]:
         )
 
 
-def repl(build_attr: BuildAttr, nix_flags: Args | None = None) -> None:
-    run_args = ["nix", "repl", "--file", build_attr.path]
-    if build_attr.attr:
-        run_args.append(build_attr.attr)
+def repl(file: Path | str, attr: str | None, nix_flags: Args | None = None) -> None:
+    run_args = ["nix", "repl", "--file", file]
+    if attr:
+        run_args.append(attr)
     run_wrapper([*run_args, *dict_to_flags(nix_flags)])
 
 

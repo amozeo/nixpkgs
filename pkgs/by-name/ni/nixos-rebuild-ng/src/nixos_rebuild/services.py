@@ -9,7 +9,15 @@ from typing import Final
 
 from . import nix, tmpdir
 from .constants import EXECUTABLE
-from .models import Action, BuildAttr, Flake, ImageVariants, NixOSRebuildError, Profile
+from .models import (
+    Action,
+    BuildAttrset,
+    BuildModule,
+    Flake,
+    ImageVariants,
+    NixOSRebuildError,
+    Profile,
+)
 from .process import Remote, cleanup_ssh
 from .utils import Args, tabulate
 
@@ -35,11 +43,16 @@ def reexec(
                 flake,
                 flake_build_flags | {"no_link": True},
             )
-        else:
-            build_attr = BuildAttr.from_arg(args.attr, args.file)
+        elif build := BuildAttrset.from_arg(args.file, args.attr):
             drv = nix.build(
+                build.path,
+                build.to_attr(NIXOS_REBUILD_ATTR),
+                build_flags | {"no_out_link": True},
+            )
+        else:
+            drv = nix.build(
+                "<nixpkgs/nixos>",
                 NIXOS_REBUILD_ATTR,
-                build_attr,
                 build_flags | {"no_out_link": True},
             )
     except CalledProcessError:
@@ -88,34 +101,31 @@ def _validate_image_variant(image_variant: str, variants: ImageVariants) -> None
 def _get_system_attr(
     action: Action,
     args: argparse.Namespace,
-    flake: Flake | None,
-    build_attr: BuildAttr,
+    build: BuildAttrset | BuildModule | Flake,
     common_flags: Args,
     flake_common_flags: Args,
 ) -> str:
     match action:
-        case Action.BUILD_IMAGE if flake:
+        case Action.BUILD_IMAGE if isinstance(build, Flake):
             variants = nix.get_build_image_variants_flake(
-                flake,
+                build,
                 eval_flags=flake_common_flags,
             )
             _validate_image_variant(args.image_variant, variants)
-            attr = f"config.system.build.images.{args.image_variant}"
-        case Action.BUILD_IMAGE:
+            return f"config.system.build.images.{args.image_variant}"
+        case Action.BUILD_IMAGE if not isinstance(build, Flake):
             variants = nix.get_build_image_variants(
-                build_attr,
+                build,
                 instantiate_flags=common_flags,
             )
             _validate_image_variant(args.image_variant, variants)
-            attr = f"config.system.build.images.{args.image_variant}"
+            return f"config.system.build.images.{args.image_variant}"
         case Action.BUILD_VM:
-            attr = "config.system.build.vm"
+            return "config.system.build.vm"
         case Action.BUILD_VM_WITH_BOOTLOADER:
-            attr = "config.system.build.vmWithBootLoader"
+            return "config.system.build.vmWithBootLoader"
         case _:
-            attr = "config.system.build.toplevel"
-
-    return attr
+            return "config.system.build.toplevel"
 
 
 def _rollback_system(
@@ -146,8 +156,7 @@ def _build_system(
     action: Action,
     build_host: Remote | None,
     target_host: Remote | None,
-    flake: Flake | None,
-    build_attr: BuildAttr,
+    build: BuildAttrset | BuildModule | Flake,
     build_flags: Args,
     common_flags: Args,
     copy_flags: Args,
@@ -158,37 +167,52 @@ def _build_system(
     # actions that we will not add a /result symlink in CWD
     no_link = action in (Action.SWITCH, Action.BOOT, Action.TEST, Action.DRY_ACTIVATE)
 
-    match (build_host, flake):
-        case (Remote(_), Flake(_)):
+    match (build_host, build):
+        case (Remote(_), Flake()):
             path_to_config = nix.build_remote_flake(
                 attr,
-                flake,
+                build,
                 build_host,
                 eval_flags=flake_common_flags,
                 flake_build_flags=flake_build_flags
                 | {"no_link": no_link, "dry_run": dry_run},
                 copy_flags=copy_flags,
             )
-        case (None, Flake(_)):
+        case (None, Flake()):
             path_to_config = nix.build_flake(
                 attr,
-                flake,
+                build,
                 flake_build_flags=flake_build_flags
                 | {"no_link": no_link, "dry_run": dry_run},
             )
-        case (Remote(_), None):
+        case (Remote(_), BuildAttrset()):
             path_to_config = nix.build_remote(
-                attr,
-                build_attr,
+                build.path,
+                build.to_attr(attr),
                 build_host,
                 realise_flags=common_flags,
                 instantiate_flags=build_flags,
                 copy_flags=copy_flags,
             )
-        case (None, None):
+        case (None, BuildAttrset()):
             path_to_config = nix.build(
-                attr,
-                build_attr,
+                build.path,
+                build.to_attr(attr),
+                build_flags=build_flags | {"no_out_link": no_link, "dry_run": dry_run},
+            )
+        case (Remote(_), BuildModule()):
+            path_to_config = nix.build_remote(
+                "<nixpkgs/nixos>",
+                build.to_attr(attr),
+                build_host,
+                realise_flags=common_flags,
+                instantiate_flags=build_flags,
+                copy_flags=copy_flags,
+            )
+        case (None, BuildModule()):
+            path_to_config = nix.build(
+                "<nixpkgs/nixos>",
+                build.to_attr(attr),
                 build_flags=build_flags | {"no_out_link": no_link, "dry_run": dry_run},
             )
 
@@ -211,8 +235,7 @@ def _activate_system(
     args: argparse.Namespace,
     target_host: Remote | None,
     profile: Profile,
-    flake: Flake | None,
-    build_attr: BuildAttr,
+    build: BuildAttrset | BuildModule | Flake,
     flake_common_flags: Args,
     common_flags: Args,
 ) -> None:
@@ -255,15 +278,18 @@ def _activate_system(
             vm_path = next(path_to_config.glob("bin/run-*-vm"), "not-found")
             print_result("Done. The virtual machine can be started by running", vm_path)
         case Action.BUILD_IMAGE:
-            if flake:
+            if isinstance(build, Flake):
                 image_name = nix.get_build_image_name_flake(
-                    flake,
+                    build,
                     args.image_variant,
                     eval_flags=flake_common_flags,
                 )
             else:
                 image_name = nix.get_build_image_name(
-                    build_attr,
+                    build.path
+                    if isinstance(build, BuildAttrset)
+                    else "<nixpkgs/nixos>",
+                    build.to_attr(),
                     args.image_variant,
                     instantiate_flags=common_flags,
                 )
@@ -277,8 +303,7 @@ def build_and_activate_system(
     build_host: Remote | None,
     target_host: Remote | None,
     profile: Profile,
-    flake: Flake | None,
-    build_attr: BuildAttr,
+    build: BuildAttrset | BuildModule | Flake,
     build_flags: Args,
     common_flags: Args,
     copy_flags: Args,
@@ -289,8 +314,7 @@ def build_and_activate_system(
     attr = _get_system_attr(
         action=action,
         args=args,
-        flake=flake,
-        build_attr=build_attr,
+        build=build,
         common_flags=common_flags,
         flake_common_flags=flake_common_flags,
     )
@@ -308,8 +332,7 @@ def build_and_activate_system(
             action=action,
             build_host=build_host,
             target_host=target_host,
-            flake=flake,
-            build_attr=build_attr,
+            build=build,
             build_flags=build_flags,
             common_flags=common_flags,
             copy_flags=copy_flags,
@@ -323,8 +346,7 @@ def build_and_activate_system(
         args=args,
         target_host=target_host,
         profile=profile,
-        flake=flake,
-        build_attr=build_attr,
+        build=build,
         common_flags=common_flags,
         flake_common_flags=flake_common_flags,
     )
@@ -358,15 +380,17 @@ def list_generations(
 
 
 def repl(
-    flake: Flake | None,
-    build_attr: BuildAttr,
+    build: BuildModule | BuildAttrset | Flake,
     flake_build_flags: Args,
     build_flags: Args,
 ) -> None:
-    if flake:
-        nix.repl_flake(flake, flake_build_flags)
-    else:
-        nix.repl(build_attr, build_flags)
+    match build:
+        case Flake():
+            nix.repl_flake(build, flake_build_flags)
+        case BuildAttrset():
+            nix.repl(build.path, build.attr, build_flags)
+        case BuildModule():
+            nix.repl("<nixpkgs/nixos>", None, build_flags)
 
 
 def write_version_suffix(build_flags: Args) -> None:

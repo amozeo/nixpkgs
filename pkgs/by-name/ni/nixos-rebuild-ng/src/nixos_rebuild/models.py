@@ -47,18 +47,24 @@ class Action(Enum):
 
 
 @dataclass(frozen=True)
-class BuildAttr:
-    path: str | Path
+class BuildAttrset:
+    path: Path
     attr: str | None
 
     def to_attr(self, *attrs: str) -> str:
-        return f"{self.attr + '.' if self.attr else ''}{'.'.join(attrs)}"
+        return f"{self.attr if self.attr else ''}{'.' if self.attr and len(attrs) > 0 else ''}{'.'.join(attrs)}"
 
     @classmethod
-    def from_arg(cls, attr: str | None, file: str | None) -> Self:
+    def from_arg(cls, file: str | Path | None, attr: str | None) -> Self | None:
         if not (attr or file):
-            return cls("<nixpkgs/nixos>", None)
+            return None
         return cls(Path(file or "default.nix"), attr)
+
+
+@dataclass(frozen=True)
+class BuildModule:
+    def to_attr(self, *attrs: str) -> str:
+        return ".".join(attrs)
 
 
 def _get_hostname(target_host: Remote | None) -> str | None:
