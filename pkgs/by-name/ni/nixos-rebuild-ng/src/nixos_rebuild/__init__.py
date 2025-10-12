@@ -7,7 +7,7 @@ from typing import Final, assert_never
 
 from . import nix, services
 from .constants import EXECUTABLE, WITH_REEXEC, WITH_SHELL_FILES
-from .models import Action, BuildAttr, Flake, Profile
+from .models import Action, BuildAttrset, BuildModule, Flake, Profile, BuildMethod
 from .process import Remote
 from .utils import LogFormatter
 
@@ -105,9 +105,25 @@ def get_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentPa
     )
     main_parser.add_argument(
         "--no-flake",
-        dest="flake",
-        action="store_false",
-        help="Do not imply --flake if /etc/nixos/flake.nix exists",
+        dest="blacklisted_build_methods",
+        action="append_const",
+        const=BuildMethod.FLAKE,
+        type=set,
+        help="Disable flake build method and autodetection",
+    )
+    main_parser.add_argument(
+        "--no-by-attrset",
+        action="append_const",
+        const=BuildMethod.ATTRSET,
+        type=set,
+        help="Disable by-attrset build method and autodetection",
+    )
+    main_parser.add_argument(
+        "--no-by-module",
+        action="append_const",
+        const=BuildMethod.MODULE,
+        type=set,
+        help="Disable by-module build method and autodetection",
     )
     main_parser.add_argument(
         "--install-bootloader",
@@ -215,6 +231,44 @@ def parse_args(
     def parser_warn(msg: str) -> None:
         print(f"{parser.prog}: warning: {msg}", file=sys.stderr)
 
+    def resolve_build_method(args: argparse.Namespace) -> BuildMethod | None:
+        if not BuildMethod.FLAKE in args.blacklisted_build_methods:
+            flake = Flake.detect()
+            if flake:
+                return BuildMethod.FLAKE
+        
+        if not BuildMethod.ATTRSET in args.blacklisted_build_methods:
+            file = BuildAttrset.detect()
+            if file:
+                return BuildMethod.ATTRSET
+
+        if not BuildMethod.MODULE in args.blacklisted_build_methods:
+            file = BuildModule.detect()
+            if file:
+                return BuildMethod.MODULE
+
+    args.requested_build_methods = set[BuildMethod]()
+
+    if args.flake:
+        args.requested_build_methods.add(BuildMethod.FLAKE)
+
+    if args.file or args.attr:
+        args.requested_build_methods.add(BuildMethod.ATTRSET)
+
+    for blacklisted_build_method in args.blacklisted_build_methods:
+        args.requested_build_methods.discard(blacklisted_build_method)
+
+    if len(args.requested_build_methods) > 1:
+        parser.error("Multiple build methods requested: " + ", ".join(map(str, args.requested_build_methods)))
+
+    if len(args.requested_build_methods) == 1:
+        args.build_method, = args.requested_build_methods
+    if len(args.requested_build_methods) == 0:
+        buildMethod = resolve_build_method(args)
+        if buildMethod == None:
+            parser.error("no build method found")
+        args.build_method = buildMethod
+
     # verbose affects both nix commands and this script, debug only this script
     if args.v or args.debug:
         logger.setLevel(logging.DEBUG)
@@ -244,9 +298,6 @@ def parse_args(
     if args.no_build_nix:
         parser_warn("--no-build-nix is deprecated, we do not build nix anymore")
 
-    if args.action == Action.EDIT.value and (args.file or args.attr):
-        parser.error("--file and --attr are not supported with 'edit'")
-
     if (args.target_host or args.build_host) and args.action not in (
         Action.SWITCH.value,
         Action.BOOT.value,
@@ -260,9 +311,6 @@ def parse_args(
         parser.error(
             f"--target-host/--build-host is not supported with '{args.action}'"
         )
-
-    if args.flake and (args.file or args.attr):
-        parser.error("--flake cannot be used with --file or --attr")
 
     return args, args_groups
 
@@ -301,7 +349,7 @@ def execute(argv: list[str]) -> None:
     profile = Profile.from_arg(args.profile_name)
     target_host = Remote.from_arg(args.target_host, args.ask_sudo_password)
     build_host = Remote.from_arg(args.build_host, False, validate_opts=False)
-    build_attr = BuildAttr.from_arg(args.attr, args.file)
+    build_attr = BuildAttrset.from_arg(args.attr, args.file)
     flake = Flake.from_arg(args.flake, target_host)
 
     if can_run and not flake:

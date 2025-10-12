@@ -15,7 +15,7 @@ from typing import Final, Literal
 from . import tmpdir
 from .models import (
     Action,
-    BuildAttr,
+    BuildAttrset,
     Flake,
     Generation,
     GenerationJson,
@@ -49,7 +49,7 @@ logger: Final = logging.getLogger(__name__)
 
 def build(
     attr: str,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     build_flags: Args | None = None,
 ) -> Path:
     """Build NixOS attribute using classic Nix.
@@ -90,7 +90,7 @@ def build_flake(
 
 def build_remote(
     attr: str,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     build_host: Remote | None,
     realise_flags: Args | None = None,
     instantiate_flags: Args | None = None,
@@ -272,7 +272,7 @@ def find_file(file: str, nix_flags: Args | None = None) -> Path | None:
 
 
 def get_build_image_name(
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     image_variant: str,
     instantiate_flags: Args | None = None,
 ) -> str:
@@ -325,7 +325,7 @@ def get_build_image_name_flake(
 
 
 def get_build_image_variants(
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     instantiate_flags: Args | None = None,
 ) -> ImageVariants:
     path = (
@@ -533,7 +533,7 @@ def list_generations(profile: Profile) -> list[GenerationJson]:
         )
 
 
-def repl(build_attr: BuildAttr, nix_flags: Args | None = None) -> None:
+def repl(build_attr: BuildAttrset, nix_flags: Args | None = None) -> None:
     run_args = ["nix", "repl", "--file", build_attr.path]
     if build_attr.attr:
         run_args.append(build_attr.attr)

@@ -23,7 +23,7 @@ from .helpers import get_qualified_name
 def test_build(mock_run: Mock) -> None:
     assert n.build(
         "config.system.build.attr",
-        m.BuildAttr("<nixpkgs/nixos>", None),
+        m.BuildAttrset("<nixpkgs/nixos>", None),
         {"nix_flag": "foo"},
     ) == Path("/path/to/file")
     mock_run.assert_called_with(
@@ -39,7 +39,7 @@ def test_build(mock_run: Mock) -> None:
     )
 
     assert n.build(
-        "config.system.build.attr", m.BuildAttr(Path("file"), "preAttr")
+        "config.system.build.attr", m.BuildAttrset(Path("file"), "preAttr")
     ) == Path("/path/to/file")
     mock_run.assert_called_with(
         ["nix-build", Path("file"), "--attr", "preAttr.config.system.build.attr"],
@@ -104,7 +104,7 @@ def test_build_remote(
 
     assert n.build_remote(
         "config.system.build.toplevel",
-        m.BuildAttr("<nixpkgs/nixos>", "preAttr"),
+        m.BuildAttrset("<nixpkgs/nixos>", "preAttr"),
         build_host,
         realise_flags={"realise": True},
         instantiate_flags={"inst": True},
@@ -322,7 +322,7 @@ def test_edit_flake(mock_run: Mock) -> None:
     ),
 )
 def test_get_build_image_variants(mock_run: Mock, tmp_path: Path) -> None:
-    build_attr = m.BuildAttr("<nixpkgs/nixos>", None)
+    build_attr = m.BuildAttrset("<nixpkgs/nixos>", None)
     assert n.get_build_image_variants(build_attr) == {
         "azure": "nixos-image-azure-25.05.20250102.6df2492-x86_64-linux.vhd",
         "vmware": "nixos-image-vmware-25.05.20250102.6df2492-x86_64-linux.vmdk",
@@ -345,7 +345,7 @@ def test_get_build_image_variants(mock_run: Mock, tmp_path: Path) -> None:
         stdout=PIPE,
     )
 
-    build_attr = m.BuildAttr(Path(tmp_path), "preAttr")
+    build_attr = m.BuildAttrset(Path(tmp_path), "preAttr")
     assert n.get_build_image_variants(build_attr, {"inst_flag": True}) == {
         "azure": "nixos-image-azure-25.05.20250102.6df2492-x86_64-linux.vhd",
         "vmware": "nixos-image-vmware-25.05.20250102.6df2492-x86_64-linux.vmdk",
@@ -563,12 +563,12 @@ def test_list_generations(mock_get_generations: Mock, tmp_path: Path) -> None:
 
 @patch(get_qualified_name(n.run_wrapper, n), autospec=True)
 def test_repl(mock_run: Mock) -> None:
-    n.repl(m.BuildAttr("<nixpkgs/nixos>", None), {"nix_flag": True})
+    n.repl(m.BuildAttrset("<nixpkgs/nixos>", None), {"nix_flag": True})
     mock_run.assert_called_with(
         ["nix", "repl", "--file", "<nixpkgs/nixos>", "--nix-flag"]
     )
 
-    n.repl(m.BuildAttr(Path("file.nix"), "myAttr"))
+    n.repl(m.BuildAttrset(Path("file.nix"), "myAttr"))
     mock_run.assert_called_with(["nix", "repl", "--file", Path("file.nix"), "myAttr"])
 
 

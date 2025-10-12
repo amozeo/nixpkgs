@@ -9,7 +9,7 @@ from typing import Final
 
 from . import nix, tmpdir
 from .constants import EXECUTABLE
-from .models import Action, BuildAttr, Flake, ImageVariants, NixOSRebuildError, Profile
+from .models import Action, BuildAttrset, Flake, ImageVariants, NixOSRebuildError, Profile
 from .process import Remote, cleanup_ssh
 from .utils import Args, tabulate
 
@@ -36,7 +36,7 @@ def reexec(
                 flake_build_flags | {"no_link": True},
             )
         else:
-            build_attr = BuildAttr.from_arg(args.attr, args.file)
+            build_attr = BuildAttrset.from_arg(args.attr, args.file)
             drv = nix.build(
                 NIXOS_REBUILD_ATTR,
                 build_attr,
@@ -89,7 +89,7 @@ def _get_system_attr(
     action: Action,
     args: argparse.Namespace,
     flake: Flake | None,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     common_flags: Args,
     flake_common_flags: Args,
 ) -> str:
@@ -147,7 +147,7 @@ def _build_system(
     build_host: Remote | None,
     target_host: Remote | None,
     flake: Flake | None,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     build_flags: Args,
     common_flags: Args,
     copy_flags: Args,
@@ -212,7 +212,7 @@ def _activate_system(
     target_host: Remote | None,
     profile: Profile,
     flake: Flake | None,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     flake_common_flags: Args,
     common_flags: Args,
 ) -> None:
@@ -278,7 +278,7 @@ def build_and_activate_system(
     target_host: Remote | None,
     profile: Profile,
     flake: Flake | None,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     build_flags: Args,
     common_flags: Args,
     copy_flags: Args,
@@ -359,7 +359,7 @@ def list_generations(
 
 def repl(
     flake: Flake | None,
-    build_attr: BuildAttr,
+    build_attr: BuildAttrset,
     flake_build_flags: Args,
     build_flags: Args,
 ) -> None:
