@@ -9,25 +9,32 @@ import nixos_rebuild.models as m
 from .helpers import get_qualified_name
 
 
-def test_build_attr_from_arg() -> None:
-    assert m.BuildAttr.from_arg(None, None) == m.BuildAttr("<nixpkgs/nixos>", None)
-    assert m.BuildAttr.from_arg("attr", None) == m.BuildAttr(
+def test_build_attrset_from_arg() -> None:
+    assert m.BuildAttrset.from_arg(None, None) is None
+    assert m.BuildAttrset.from_arg(None, "attr") == m.BuildAttrset(
         Path("default.nix"), "attr"
     )
-    assert m.BuildAttr.from_arg("attr", "file.nix") == m.BuildAttr(
+    assert m.BuildAttrset.from_arg("file.nix", "attr") == m.BuildAttrset(
         Path("file.nix"), "attr"
     )
-    assert m.BuildAttr.from_arg(None, "file.nix") == m.BuildAttr(Path("file.nix"), None)
+    assert m.BuildAttrset.from_arg("file.nix", None) == m.BuildAttrset(
+        Path("file.nix"), None
+    )
 
 
-def test_build_attr_to_attr() -> None:
+def test_build_attrset_to_attr() -> None:
     assert (
-        m.BuildAttr("<nixpkgs/nixos>", None).to_attr("attr1", "attr2") == "attr1.attr2"
+        m.BuildAttrset(Path("file.nix"), None).to_attr("attr1", "attr2")
+        == "attr1.attr2"
     )
     assert (
-        m.BuildAttr("<nixpkgs/nixos>", "preAttr").to_attr("attr1", "attr2")
+        m.BuildAttrset(Path("file.nix"), "preAttr").to_attr("attr1", "attr2")
         == "preAttr.attr1.attr2"
     )
+
+
+def test_build_module_to_attr() -> None:
+    assert m.BuildModule().to_attr("attr1", "attr2") == "attr1.attr2"
 
 
 @patch("platform.node", autospec=True, return_value=None)

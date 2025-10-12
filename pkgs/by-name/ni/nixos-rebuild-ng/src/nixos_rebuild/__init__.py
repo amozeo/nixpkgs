@@ -7,7 +7,7 @@ from typing import Final, assert_never
 
 from . import nix, services
 from .constants import EXECUTABLE, WITH_REEXEC, WITH_SHELL_FILES
-from .models import Action, BuildAttr, Flake, Profile
+from .models import Action, BuildAttrset, BuildModule, Flake, Profile
 from .process import Remote
 from .utils import LogFormatter
 
@@ -301,8 +301,14 @@ def execute(argv: list[str]) -> None:
     profile = Profile.from_arg(args.profile_name)
     target_host = Remote.from_arg(args.target_host, args.ask_sudo_password)
     build_host = Remote.from_arg(args.build_host, False, validate_opts=False)
-    build_attr = BuildAttr.from_arg(args.attr, args.file)
-    flake = Flake.from_arg(args.flake, target_host)
+    build: BuildAttrset | BuildModule | Flake | None = None
+
+    if flake := Flake.from_arg(args.flake, target_host):
+        build = flake
+    elif build_attrset := BuildAttrset.from_arg(args.file, args.attr):
+        build = build_attrset
+    else:
+        build = BuildModule()
 
     if can_run and not flake:
         services.write_version_suffix(build_flags)
@@ -325,8 +331,7 @@ def execute(argv: list[str]) -> None:
                 build_host=build_host,
                 target_host=target_host,
                 profile=profile,
-                flake=flake,
-                build_attr=build_attr,
+                build=build,
                 build_flags=build_flags,
                 common_flags=common_flags,
                 copy_flags=copy_flags,
@@ -345,8 +350,7 @@ def execute(argv: list[str]) -> None:
 
         case Action.REPL:
             services.repl(
-                flake=flake,
-                build_attr=build_attr,
+                build,
                 flake_build_flags=flake_build_flags,
                 build_flags=build_flags,
             )

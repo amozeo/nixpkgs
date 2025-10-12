@@ -23,8 +23,8 @@ def test_reexec(mock_build: Mock, mock_execve: Mock, monkeypatch: MonkeyPatch) -
     mock_build.assert_has_calls(
         [
             call(
+                "<nixpkgs/nixos>",
                 s.NIXOS_REBUILD_ATTR,
-                n.models.BuildAttr(ANY, ANY),
                 {"build": True, "no_out_link": True},
             )
         ]
