@@ -1,3 +1,4 @@
+import os
 import platform
 import re
 import subprocess
@@ -6,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, Self, TypedDict, override
 
+from .nix import find_file
 from .process import Remote, run_wrapper
 
 type ImageVariants = dict[str, str]
@@ -47,18 +49,58 @@ class Action(Enum):
 
 
 @dataclass(frozen=True)
-class BuildAttr:
-    path: str | Path
+class BuildAttrset:
+    path: Path
     attr: str | None
 
     def to_attr(self, *attrs: str) -> str:
         return f"{self.attr + '.' if self.attr else ''}{'.'.join(attrs)}"
 
     @classmethod
-    def from_arg(cls, attr: str | None, file: str | None) -> Self:
-        if not (attr or file):
-            return cls("<nixpkgs/nixos>", None)
+    def from_arg(cls, attr: str | None, file: str | Path | None) -> Self:
         return cls(Path(file or "default.nix"), attr)
+
+    @staticmethod
+    def detect() -> "BuildAttrset | None":
+        # - From nixos-system in nix path
+        path = find_file("nixos-system")
+        if path:
+            return BuildAttrset.from_arg(None, str(path))
+
+        # - From default.nix up from the current directory
+        path = Path.cwd()
+        while path.root != str(path):
+            if (path / "default.nix").is_file():
+                return BuildAttrset.from_arg(None, path / "default.nix")
+            path = path.parent
+
+        # - Hardcoded to /etc/nixos/default.nix
+        path = Path("/etc/nixos/default.nix")
+        if (path.is_file()):
+            return BuildAttrset.from_arg(None, path)
+
+
+@dataclass(frozen=True)
+class BuildModule:
+    path: Path
+
+    def to_attr(self, *attrs: str) -> str:
+        return '.'.join(attrs)
+
+    @classmethod
+    def from_path(cls, file: str | Path) -> Self:
+        return cls(Path(file))
+
+    @classmethod
+    def detect(cls) -> Self | None:
+        # - From NIXOS_CONFIG environment variable
+        if "NIXOS_CONFIG" in os.environ:
+            return cls.from_path(os.environ["NIXOS_CONFIG"])
+
+        # - From nixos-config in nix path
+        path = find_file("nixos-config")
+        if path:
+            return cls.from_path(path)
 
 
 def _get_hostname(target_host: Remote | None) -> str | None:
@@ -124,6 +166,14 @@ class Flake:
         except FileNotFoundError:
             return self.path
 
+    @classmethod
+    def detect(cls) -> Self | None:
+        # - Hardcoded resolved symlink /etc/nixos/flake.nix
+        default_path = Path("/etc/nixos/flake.nix")
+        if default_path.exists():
+            default_path = default_path.resolve(strict=True)
+            return cls.parse(str(default_path))
+
 
 @dataclass(frozen=True)
 class Generation:
@@ -157,3 +207,13 @@ class Profile:
                 path = Path("/nix/var/nix/profiles/system-profiles") / name
                 path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
                 return cls(name, path)
+
+
+class BuildMethod(Enum):
+    FLAKE = "flake"
+    MODULE = "module"
+    ATTRSET = "attrset"
+
+    @override
+    def __str__(self) -> str:
+        return self.value

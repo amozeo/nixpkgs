@@ -24,7 +24,7 @@ def test_reexec(mock_build: Mock, mock_execve: Mock, monkeypatch: MonkeyPatch) -
         [
             call(
                 s.NIXOS_REBUILD_ATTR,
-                n.models.BuildAttr(ANY, ANY),
+                n.models.BuildAttrset(ANY, ANY),
                 {"build": True, "no_out_link": True},
             )
         ]
