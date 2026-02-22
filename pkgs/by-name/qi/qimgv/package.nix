@@ -74,6 +74,9 @@ stdenv.mkDerivation {
     homepage = "https://github.com/easymodo/qimgv";
     license = lib.licenses.gpl3;
     platforms = lib.platforms.linux;
-    maintainers = with lib.maintainers; [ cole-h ];
+    maintainers = with lib.maintainers; [
+      amozeo
+      cole-h
+    ];
   };
 }
