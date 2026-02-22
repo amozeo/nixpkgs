@@ -3,28 +3,28 @@
   stdenv,
   fetchFromGitHub,
   cmake,
-  pkg-config,
-  kdePackages,
   exiv2,
   mpv,
   opencv4,
+  pkg-config,
+  qt6,
 }:
 
 stdenv.mkDerivation {
   pname = "qimgv";
-  version = "1.0.3-unstable-2024-10-11";
+  version = "1.0.3-unstable-2026-01-19";
 
   src = fetchFromGitHub {
     owner = "easymodo";
     repo = "qimgv";
-    rev = "a4d475fae07847be7c106cb628fb97dad51ab920";
-    sha256 = "sha256-iURUJiPe8hbCnpaf6lk8OVSzVqrJKGab889yOic5yLI=";
+    rev = "3127a2d211b124ad4fcf853d01e6df9323bdfdc3";
+    sha256 = "sha256-avn02kdMyA5PZUSykxgIk1I78zHQ/WKd26tQO8lMOow=";
   };
 
   nativeBuildInputs = [
     cmake
     pkg-config
-    kdePackages.wrapQtAppsHook
+    qt6.wrapQtAppsHook
   ];
 
   cmakeFlags = [
@@ -35,24 +35,16 @@ stdenv.mkDerivation {
   buildInputs = [
     exiv2
     mpv
-    opencv4.cxxdev
-    kdePackages.qtbase
-    kdePackages.qtimageformats
-    kdePackages.qtsvg
-    kdePackages.qttools
-    kdePackages.kimageformats
+    opencv4
+    qt6.qtbase
+    qt6.qtsvg
+    qt6.qttools
   ];
 
   postPatch = ''
-    sed -i "s@/usr/bin/mpv@${mpv}/bin/mpv@" \
-      qimgv/settings.cpp
+    substituteInPlace qimgv/settings.cpp \
+      --replace-fail '"/usr/bin/mpv"' '"'${lib.escapeShellArg (lib.getExe mpv)}'"'
   '';
-
-  # Wrap the library path so it can see `libqimgv_player_mpv.so`, which is used
-  # to play video files within qimgv itself.
-  qtWrapperArgs = [
-    "--prefix LD_LIBRARY_PATH : ${placeholder "out"}/lib"
-  ];
 
   meta = {
     description = "Qt6 image viewer with optional video support";
